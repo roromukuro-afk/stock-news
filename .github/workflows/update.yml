@@ -1,6 +1,6 @@
 name: Update and publish
 
-# 毎時、ニュースを取り直して Cloudflare Pages（合言葉つき）に置く。
+# 毎時 7 分・37 分（UTC）に、ニュースを取り直して Cloudflare Pages（合言葉つき）に置く。
 # このリポジトリは公開（Public）。公開リポジトリは Actions の分数が無制限・無料。
 # リポジトリに入れるのはコードだけ。記事のデータ・銘柄リスト・合言葉・トークンは入れない:
 #   - 記事のデータは、この実行の中で作り、そのまま Cloudflare に置く（コミットしない）
@@ -10,7 +10,7 @@ name: Update and publish
 
 on:
   schedule:
-    - cron: "7 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 # 前回の実行が長引いても重ならないよう、終わるまで待たせる（取り消さない）
