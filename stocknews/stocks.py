@@ -37,6 +37,7 @@ class Stock:
     term_res: list[re.Pattern]
     code_re: re.Pattern | None
     exclude: list[tuple[str, re.Pattern]]    # (表示用の語, 照合)
+    keyword_res: list[re.Pattern] = field(default_factory=list)   # キーワード（日本語・英語）。当たっても「関連不確実」止まり
     masks: list[str] = field(default_factory=list)   # この銘柄の語を含む、より長い別銘柄の語（取り違え防止）
 
     def mask(self, text: str) -> str:
@@ -46,6 +47,9 @@ class Stock:
 
     def name_hit(self, text: str) -> bool:
         return any(r.search(text) for r in self.term_res)
+
+    def keyword_hit(self, text: str) -> bool:
+        return any(r.search(text) for r in self.keyword_res)
 
 
 def _code_regex(code: str) -> re.Pattern | None:
@@ -69,15 +73,24 @@ def _code_regex(code: str) -> re.Pattern | None:
 def build_matchers(watchlist: list[dict]) -> list[Stock]:
     stocks: list[Stock] = []
     for w in watchlist:
+        if w.get("status", "active") == "paused":
+            continue   # 停止中の銘柄は照合しない（画面には残す）
         terms = []
-        for t in [w["name"]] + list(w.get("aliases", [])):
+        for t in [w["name"], w.get("name_en", "")] + list(w.get("aliases", [])):
             f = fold(t)
             if f and f not in terms:
                 terms.append(f)
+        # キーワードは社名・別名ほど確実ではない（「キャラクター」など広い語もある）ので、別に持つ
+        kws = []
+        for k in list(w.get("jp_keywords", [])) + list(w.get("en_keywords", [])):
+            f = fold(k)
+            if f and f not in terms and f not in kws:
+                kws.append(f)
         stocks.append(Stock(
             name=w["name"], code=w.get("code", ""), terms=terms, term_res=[term_regex(t) for t in terms],
             code_re=_code_regex(w.get("code", "")),
             exclude=[(x, term_regex(fold(x))) for x in w.get("exclude", []) if fold(x)],
+            keyword_res=[term_regex(k) for k in kws],
         ))
     # 「ソフトバンク」と「ソフトバンクグループ」のように、ある銘柄の語が別の銘柄のより長い語の一部のとき、
     # 長い方が出てくる所は短い方の一致として数えない
@@ -156,6 +169,8 @@ def assess(stock: Stock, title: str, summary: str, company: str | None, *, via: 
         base = UNCERTAIN
     elif stock.code_re is not None and (stock.code_re.search(t) or stock.code_re.search(s)):
         base = UNCERTAIN
+    elif stock.keyword_hit(t):
+        base = UNCERTAIN   # キーワードが見出しにあるだけ（社名・別名は無い）
     elif via:
         base = UNCERTAIN   # Google ニュースがその銘柄の検索で返したが、見出し・要約には名前が無い
     else:

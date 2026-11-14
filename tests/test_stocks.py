@@ -156,6 +156,52 @@ class ConfigExcludeTests(unittest.TestCase):
             self.assertIsInstance(w["exclude"], list)
 
 
+class StockProfileTests(unittest.TestCase):
+    """銘柄の記録を開示レーダー（stocks / stock_profiles）と同じ項目にしたもの。"""
+
+    def test_old_entries_still_load_and_get_defaults(self):
+        w = config.clean_watch({"name": "テスト商事", "code": "9999", "aliases": "Test", "exclude": ""})
+        self.assertEqual(w["status"], "active")
+        for k in ("name_en", "exchange", "sector", "official_url", "ir_url"):
+            self.assertEqual(w[k], "")
+        self.assertEqual((w["jp_keywords"], w["en_keywords"]), ([], []))
+
+    def test_profile_fields_are_cleaned_and_validated(self):
+        w = config.clean_watch({"name": "テスト商事", "name_en": " Test Shoji ", "exchange": "東証プライム", "sector": "サービス業",
+                                "official_url": "https://example.com/", "ir_url": "http://example.com/ir",
+                                "jp_keywords": "新作、人気キャラ, 新作", "en_keywords": ["Test", "test"], "status": "paused"})
+        self.assertEqual((w["name_en"], w["status"]), ("Test Shoji", "paused"))
+        self.assertEqual(w["jp_keywords"], ["新作", "人気キャラ"])
+        self.assertEqual(w["en_keywords"], ["Test"])
+        for bad in ({"status": "removed"}, {"official_url": "javascript:alert(1)"}, {"ir_url": "ftp://example.com/"},
+                    {"official_url": "https://example.com/ x"}, {"name_en": "x" * 61}, {"sector": "x" * 31}):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                config.clean_watch({"name": "テスト商事", **bad})
+
+    def test_keywords_make_uncertain_matches_only(self):
+        ms = {m.name: m for m in st.build_matchers(config.clean_watchlist([
+            {"name": "テスト商事", "code": "9999", "name_en": "Test Shoji", "jp_keywords": "人気キャラ", "en_keywords": "Mascot"}]))}
+        m = ms["テスト商事"]
+        a2 = lambda title: st.assess(m, title, "", None, via=False, safe=False)[0]  # noqa: E731
+        self.assertEqual(a2("人気キャラの新作が発売"), st.UNCERTAIN)       # キーワードだけ → 関連不確実（確実にはならない）
+        self.assertEqual(a2("New Mascot unveiled today"), st.UNCERTAIN)
+        self.assertEqual(a2("テスト商事が新作を発表"), st.CERTAIN)          # 社名があれば確実
+        self.assertEqual(a2("Test Shoji reports results"), st.CERTAIN)      # 英語名も社名として確実
+        self.assertIsNone(a2("全く別の話題"))
+
+    def test_paused_stock_is_not_matched_or_searched(self):
+        wl = config.clean_watchlist([{"name": "テスト商事", "status": "paused"}, {"name": "別の会社"}])
+        self.assertEqual([m.name for m in st.build_matchers(wl)], ["別の会社"])
+        from stocknews import refresh
+        self.assertEqual([s["watch"] for s in refresh.watch_sources(wl)], ["別の会社"])
+        self.assertEqual([w["name"] for w in wl], ["テスト商事", "別の会社"])        # 記録は残る（画面に「停止中」で出す）
+
+    def test_name_en_is_searched(self):
+        from stocknews import refresh
+        src = refresh.watch_sources(config.clean_watchlist([{"name": "テスト商事", "name_en": "Test Shoji"}]))[0]
+        self.assertIn('"Test Shoji"', src["gn"])
+
+
 class ExportIntegrationTests(unittest.TestCase):
     def setUp(self):
         root = Path(tempfile.mkdtemp(prefix="stocknews_stocks_"))

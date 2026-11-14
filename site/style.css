@@ -291,3 +291,31 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 .pchips { display: flex; flex-wrap: wrap; gap: 4px; }
 .pchip { padding: 1px 9px; border-radius: 999px; background: var(--accent-soft); font-size: 12.5px; }
 .pnone { color: var(--faint); font-size: 12.5px; }
+
+/* ---- 銘柄の記録（開示レーダーの銘柄の一覧・銘柄の画面と同じ並び） ---- */
+.stock-sec-head { align-items: flex-start; justify-content: space-between; flex-wrap: nowrap; gap: 12px; }
+.stock-sec-head .l { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.stock-sec-head .top-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stock-sec-head .code, .stock-id .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 800; color: var(--text); font-size: 15px; }
+.stock-sec-head .nm { font-size: 14px; font-weight: 400; }
+.stock-sec-head .sub { color: var(--faint); font-size: 12px; }
+.stock-sec-head .stats { flex: none; text-align: right; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.stock-sec-head .stats b { font-weight: 700; margin-left: 8px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.stock-sec-head .stats b.on { color: var(--accent); }
+.stock-sec-head .stats b.g { color: var(--ok); }
+.sg-label { margin: 18px 0 -6px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
+.status { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; background: color-mix(in srgb, var(--ok) 16%, var(--surface)); color: var(--ok); }
+.status.is-paused { background: var(--accent-soft); color: var(--muted); }
+
+.stock-head { justify-content: space-between; }
+.stock-id { padding: 6px 0 2px; }
+.stock-id .id-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stock-id .code { font-size: 18px; }
+.stock-id h2 { margin: 2px 0 0; font-size: 21px; line-height: 1.4; overflow-wrap: anywhere; }
+.stock-id .sub { margin: 2px 0 0; font-size: 13.5px; color: var(--muted); }
+.stock-id .links { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+.stock-id .links a { font-size: 12.5px; color: var(--accent); text-decoration: none; }
+.stock-id .links a:hover { text-decoration: underline; }
+.profile .purl { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.profile .purl a { color: var(--accent); }
+.watch-form select { font: inherit; font-size: 15px; padding: 9px 12px; border-radius: 8px; color: var(--text); border: 1px solid var(--line); background: var(--bg); }

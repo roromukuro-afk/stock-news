@@ -30,7 +30,10 @@ def watch_sources(watchlist: list[dict]) -> list[dict]:
     """ウォッチリストの 1 件につき Google ニュースの検索を 1 本作る。"""
     out = []
     for w in watchlist:
-        terms = [w["name"]] + list(w.get("aliases", []))
+        if w.get("status", "active") == "paused":
+            continue   # 停止中の銘柄は検索しない
+        terms = [w["name"]] + ([w["name_en"]] if w.get("name_en") else []) + list(w.get("aliases", []))
+        terms = list(dict.fromkeys(terms))
         code = w.get("code") or ""
         # 数字だけの銘柄コードは検索に使わない（「1911」が拳銃や球団の創設年に当たるなど、無関係な記事が大量に来る）
         if code and re.fullmatch(r"[A-Za-z]{3,}", code):

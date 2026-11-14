@@ -97,6 +97,26 @@ def _terms(raw, label: str, limit: int, min_len: int = 2) -> list[str]:
     return out[:limit]
 
 
+STATUSES = ("active", "paused")      # 監視中・停止中（停止中は取得も照合もしない）
+MAX_KEYWORDS = 10
+
+
+def _text(raw, label: str, limit: int) -> str:
+    s = str(raw or "").strip()
+    if len(s) > limit:
+        raise ValueError(f"{label}は {limit} 文字以内で入力してください")
+    return s
+
+
+def _url(raw, label: str) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    if len(s) > 300 or not re.match(r"^https?://[^\s<>\"']+$", s, re.I):
+        raise ValueError(f"{label}は http:// か https:// で始まる URL で入力してください")
+    return s
+
+
 def clean_watch(raw: dict) -> dict:
     name = str(raw.get("name", "")).strip()
     if not 2 <= len(name) <= 40:
@@ -106,7 +126,22 @@ def clean_watch(raw: dict) -> dict:
         raise ValueError("コードは英数字（ハイフン・ドット可）12 文字以内で入力してください")
     aliases = [a for a in _terms(raw.get("aliases"), "別名", 8) if a.casefold() != name.casefold()]
     exclude = _terms(raw.get("exclude"), "除外語", MAX_EXCLUDE)
-    return {"name": name, "code": code, "aliases": aliases[:5], "exclude": exclude}
+    # 開示レーダーの銘柄（stocks / stock_profiles）と同じ項目。無くても動く（古い銘柄リストもそのまま読める）
+    status = str(raw.get("status", "") or "active").strip()
+    if status not in STATUSES:
+        raise ValueError("状態は 監視中（active）か 停止中（paused）にしてください")
+    return {
+        "name": name, "code": code,
+        "name_en": _text(raw.get("name_en"), "英語名", 60),
+        "status": status,
+        "exchange": _text(raw.get("exchange"), "市場", 30),
+        "sector": _text(raw.get("sector"), "業種", 30),
+        "official_url": _url(raw.get("official_url"), "公式サイトの URL"),
+        "ir_url": _url(raw.get("ir_url"), "IR 情報の URL"),
+        "jp_keywords": _terms(raw.get("jp_keywords"), "キーワード（日本語）", MAX_KEYWORDS),
+        "en_keywords": _terms(raw.get("en_keywords"), "キーワード（英語）", MAX_KEYWORDS),
+        "aliases": aliases[:5], "exclude": exclude,
+    }
 
 
 def clean_watchlist(raw_list) -> list[dict]:

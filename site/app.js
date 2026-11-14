@@ -148,6 +148,9 @@
   // 銘柄別画面: 選んだ銘柄の記事
   const stockPool = (name) => S.items.filter((it) => stocksOf(it).some((s) => s.n === name));
   const relOf = (it, name) => (stocksOf(it).find((s) => s.n === name) || {}).r;
+  const stockInfo = (name) => watchlist().find((w) => w.name === name) || {};
+  const codeOf = (name) => stockInfo(name).code || '';
+  const isPaused = (w) => w.status === 'paused';
   const isImportant = (it) => it.tier === 'critical' || it.tier === 'important';
 
   // 記事の種別: 適時開示 / 国内（日本語）/ 海外（英語）
@@ -181,7 +184,7 @@
       : '';
     const company = it.company ? `<span class="co">${esc(it.company)}</span>` : '';
     const stockTags = sts.map((s) =>
-      `<span class="wtag">★ ${esc(s.n)}</span>${s.r === 'uncertain' ? '<span class="rel-uncertain" title="社名が見出しに無い・コードだけ・検索で当たっただけの記事">関連不確実</span>' : ''}`).join('');
+      `<span class="wtag">${esc([codeOf(s.n), s.n].filter(Boolean).join(' '))}</span>${s.r === 'uncertain' ? '<span class="rel-uncertain" title="社名が見出しに無い・コードだけ・検索で当たっただけの記事">関連不確実</span>' : ''}`).join('');
     const kind = it.kind ? `<span class="kind">${esc(kindLabel(it.kind))}</span>` : '';
     const tier = TIER_LABEL[it.tier] ? `<span class="tier tier-${esc(it.tier)}" title="${esc(it.tier_reason || '')}">${TIER_LABEL[it.tier]}</span>` : '';
     const langTag = it.lang === 'en' ? '<span class="lang-tag">EN</span>' : '';
@@ -284,25 +287,32 @@
     }
     const rows = wl.map((w, i) => ({ w, i, st: stockStats(w.name) }))
       .sort((a, b) => (b.st.latest - a.st.latest) || (a.i - b.i));
-    list.innerHTML = rows.map(({ w, st }) => {
-      const pool = commonFilter(stockPool(w.name)).filter((it) => visibleIn(it, w.name)).sort((a, b) => b.time - a.time);
-      const body = pool.length
+    // 開示レーダーの銘柄の一覧と同じ並び: 左に コード・未読・★／名前／市場・業種、右に 未読・24h・全記事
+    const section = ({ w, st }) => {
+      const paused = isPaused(w);
+      const pool = paused ? [] : commonFilter(stockPool(w.name)).filter((it) => visibleIn(it, w.name)).sort((a, b) => b.time - a.time);
+      const body = paused ? '<div class="empty">停止中のため、取得も照合もしていません。</div>' : pool.length
         ? pool.slice(0, HOME_N).map((it) => renderItem(it, w.name)).join('')
         : `<div class="empty">${st.total ? 'この条件に合う記事はありません。' : '直近に記事がありません。'}</div>`;
       const more = pool.length > HOME_N
         ? `<button class="btn btn-wide" type="button" data-pick="${esc(w.name)}">${esc(w.name)}の記事をすべて見る（${pool.length}件）</button>` : '';
-      const pills = [`<span class="pill">全記事 ${st.total}</span>`];
-      if (st.unread) pills.push(`<span class="pill">未読 ${st.unread}</span>`);
-      if (st.importantUnread) pills.push(`<span class="pill pill-crit">★重要 ${st.importantUnread}</span>`);
-      pills.push(`<span class="pill">24時間 ${st.last24h}</span>`);
+      const sub = [w.exchange, w.sector].filter(Boolean).join(' · ');
       return `<section class="stock-sec" aria-label="${esc(w.name)}">
   <button class="stock-sec-head" type="button" data-pick="${esc(w.name)}">
-    <span class="nm">${esc(w.name)}</span><span class="code">${esc(w.code || '')}</span>
-    <span class="nums">${pills.join('')}</span><span class="go">すべて見る →</span>
+    <span class="l">
+      <span class="top-line"><span class="code">${esc(w.code || w.name)}</span>${paused ? '<span class="status is-paused">停止中</span>' : ''}${st.unread ? `<span class="pill">${st.unread}</span>` : ''}${st.importantUnread ? `<span class="pill pill-crit">★${st.importantUnread}</span>` : ''}</span>
+      ${w.code ? `<span class="nm">${esc(w.name)}</span>` : ''}
+      ${sub ? `<span class="sub">${esc(sub)}</span>` : ''}
+    </span>
+    <span class="stats"><span>未読<b class="${st.unread ? 'on' : ''}">${st.unread}</b></span><span>24h<b class="${st.last24h ? 'g' : ''}">${st.last24h}</b></span><span>全記事<b>${st.total}</b></span></span>
   </button>
   ${body}${more}
 </section>`;
-    }).join('');
+    };
+    const active = rows.filter(({ w }) => !isPaused(w));
+    const paused = rows.filter(({ w }) => isPaused(w));
+    list.innerHTML = (active.length ? `<p class="sg-label">監視中 (${active.length})</p>` + active.map(section).join('') : '')
+      + (paused.length ? `<p class="sg-label">停止中 (${paused.length})</p>` + paused.map(section).join('') : '');
   }
 
   // 未読の最重要記事（登録銘柄のもの）を、絞り込みに関わらず上に出す
@@ -324,9 +334,18 @@
   }
 
   function renderStockDetail(name) {
-    const w = watchlist().find((x) => x.name === name);
+    const w = stockInfo(name);
+    // 開示レーダーの銘柄の画面の見出しと同じ: コード＋状態／名前／市場・業種／公式サイト・IR 情報
+    $('#stock-code').textContent = w.code || '';
+    const status = $('#stock-status');
+    status.textContent = isPaused(w) ? '停止中' : '監視中';
+    status.classList.toggle('is-paused', isPaused(w));
     $('#stock-name').textContent = name;
-    $('#stock-code').textContent = w && w.code ? w.code : '';
+    const sub = [w.name_en, w.exchange, w.sector].filter(Boolean).join(' · ');
+    $('#stock-sub').textContent = sub;
+    $('#stock-sub').hidden = !sub;
+    $('#stock-links').innerHTML = [[w.official_url, '公式サイト ↗'], [w.ir_url, 'IR情報 ↗']].filter(([u]) => u)
+      .map(([u, label]) => `<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener noreferrer">${label}</a>`).join('');
     const base = stockBase(name);
     const ex = excludedOf(name);
     // 銘柄の数字（開示レーダーの銘柄の画面と同じ並び）
@@ -380,10 +399,14 @@
     box.hidden = !w;
     if (!w) return;
     const chips = (arr) => (arr.length ? arr.map((t) => `<span class="pchip">${esc(t)}</span>`).join('') : '<span class="pnone">なし</span>');
-    box.innerHTML = `<h2>監視の設定</h2>
-  <p class="pl">名前・別名（見出しとの照合に使う）</p><div class="pchips">${chips([w.name, ...(w.aliases || [])])}</div>
-  <p class="pl">コード</p><div class="pchips">${chips(w.code ? [w.code] : [])}</div>
-  <p class="pl">除外語（当たった記事は外す。決算・M&amp;A・訴訟などの語がある記事は残す）</p><div class="pchips">${chips(w.exclude || [])}</div>`;
+    const link = (label, u) => (u ? `<p class="purl">${label}: <a href="${esc(safeUrl(u))}" target="_blank" rel="noopener noreferrer">${esc(u)}</a></p>` : '');
+    const kw = (label, arr) => (arr && arr.length ? `<p class="pl">${label}</p><div class="pchips">${chips(arr)}</div>` : '');
+    // 開示レーダーの「監視プロフィール」と同じ並び（キーワード・公式URL・IR URL）に、こちらの別名・除外語を足す
+    box.innerHTML = `<h2>監視プロフィール</h2>
+  ${kw('キーワード (JP)　見出しにあると「関連不確実」で拾う', w.jp_keywords)}${kw('キーワード (EN)', w.en_keywords)}
+  <p class="pl">別名（社名として確実に拾う）</p><div class="pchips">${chips([...new Set([w.name, w.name_en, ...(w.aliases || [])].filter(Boolean))])}</div>
+  <p class="pl">除外語（当たった記事は外す。決算・M&amp;A・訴訟などの語がある記事は残す）</p><div class="pchips">${chips(w.exclude || [])}</div>
+  ${link('公式URL', w.official_url)}${link('IR URL', w.ir_url)}`;
   }
 
   function renderStocks() {
@@ -493,11 +516,11 @@
   function renderWatch() {
     const wl = watchlist();
     $('#watch-list').innerHTML = wl.length
-      ? wl.map((w, i) => `<li><span><span class="nm">${esc(w.name)}</span><span class="sub">${esc([w.code, ...(w.aliases || [])].filter(Boolean).join(' / '))}${(w.exclude || []).length ? ` ・ 除外語 ${w.exclude.length}` : ''}</span></span>
+      ? wl.map((w, i) => `<li><span><span class="nm">${esc(w.name)}</span><span class="sub">${esc([w.code, w.exchange, w.sector].filter(Boolean).join(' / '))}${isPaused(w) ? ' ・ 停止中' : ''}${(w.exclude || []).length ? ` ・ 除外語 ${w.exclude.length}` : ''}</span></span>
           <span class="acts"><button class="btn" type="button" data-edit="${i}" ${S.live ? '' : 'disabled'}>編集</button><button class="btn" type="button" data-del="${i}" ${S.live ? '' : 'disabled'}>削除</button></span></li>`).join('')
       : '<li class="watch-empty">まだ登録がありません。</li>';
     const form = $('#watch-form');
-    $$('input,button', form).forEach((el) => { el.disabled = !S.live; });
+    $$('input,select,button', form).forEach((el) => { el.disabled = !S.live; });
     $('#watch-msg').textContent = S.live ? '' : '銘柄の編集は、PC で起動した画面（start.bat）でだけできます。この画面は取得済みのデータの写しです。';
     $('#watch-msg').classList.remove('is-error');
   }
@@ -520,6 +543,14 @@
     const f = $('#watch-form');
     f.name.value = w.name;
     f.code.value = w.code || '';
+    f.name_en.value = w.name_en || '';
+    f.status.value = isPaused(w) ? 'paused' : 'active';
+    f.exchange.value = w.exchange || '';
+    f.sector.value = w.sector || '';
+    f.official_url.value = w.official_url || '';
+    f.ir_url.value = w.ir_url || '';
+    f.jp_keywords.value = (w.jp_keywords || []).join(', ');
+    f.en_keywords.value = (w.en_keywords || []).join(', ');
     f.aliases.value = (w.aliases || []).join(', ');
     f.exclude.value = (w.exclude || []).join(', ');
     $('#watch-submit').textContent = '更新';
@@ -668,7 +699,12 @@
     $('#watch-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = e.target;
-      const entry = { name: f.name.value.trim(), code: f.code.value.trim(), aliases: f.aliases.value, exclude: f.exclude.value };
+      const entry = {
+        name: f.name.value.trim(), code: f.code.value.trim(), name_en: f.name_en.value.trim(), status: f.status.value,
+        exchange: f.exchange.value.trim(), sector: f.sector.value.trim(),
+        official_url: f.official_url.value.trim(), ir_url: f.ir_url.value.trim(),
+        jp_keywords: f.jp_keywords.value, en_keywords: f.en_keywords.value, aliases: f.aliases.value, exclude: f.exclude.value,
+      };
       const wl = watchlist().slice();
       const editing = S.editing;
       const idx = wl.findIndex((w) => w.name.toLowerCase() === (editing || entry.name).toLowerCase());

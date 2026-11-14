@@ -60,8 +60,13 @@
     <div id="stock-detail" hidden>
       <div class="stock-head">
         <button id="stock-back" class="btn" type="button">← 銘柄ごとに戻る</button>
-        <div class="stock-title"><h2 id="stock-name"></h2><span id="stock-code" class="code"></span></div>
-        <button id="stock-edit" class="btn" type="button">除外語・別名</button>
+        <button id="stock-edit" class="btn" type="button">銘柄の設定</button>
+      </div>
+      <div class="stock-id">
+        <div class="id-line"><span id="stock-code" class="code"></span><span id="stock-status" class="status"></span></div>
+        <h2 id="stock-name"></h2>
+        <p id="stock-sub" class="sub"></p>
+        <div id="stock-links" class="links"></div>
       </div>
       <div id="stock-stats" class="stat-grid"></div>
       <div id="type-chips" class="tabs" role="tablist" aria-label="種別"></div>
@@ -96,7 +101,15 @@
     <form id="watch-form" class="watch-form" autocomplete="off">
       <label>名前<input name="name" required minlength="2" maxlength="40" placeholder="例: トヨタ自動車"></label>
       <label>コード（任意）<input name="code" maxlength="12" placeholder="例: 7203 / NVDA"></label>
-      <label>別名（任意・カンマ区切り）<input name="aliases" maxlength="200" placeholder="例: トヨタ, Toyota"></label>
+      <label>英語名（任意）<input name="name_en" maxlength="60" placeholder="例: Toyota Motor"></label>
+      <label>状態<select name="status"><option value="active">監視中</option><option value="paused">停止中（取得も照合もしない）</option></select></label>
+      <label>市場（任意）<input name="exchange" maxlength="30" placeholder="例: 東証プライム"></label>
+      <label>業種（任意）<input name="sector" maxlength="30" placeholder="例: 輸送用機器"></label>
+      <label>公式サイトの URL（任意）<input name="official_url" type="url" maxlength="300" placeholder="https://…"></label>
+      <label>IR 情報の URL（任意）<input name="ir_url" type="url" maxlength="300" placeholder="https://…"></label>
+      <label>キーワード・日本語（任意・カンマ区切り。見出しにあると「関連不確実」で拾う）<input name="jp_keywords" maxlength="300" placeholder="例: トヨタ, レクサス"></label>
+      <label>キーワード・英語（任意・カンマ区切り）<input name="en_keywords" maxlength="300" placeholder="例: Toyota, Lexus"></label>
+      <label>別名（任意・カンマ区切り。社名として確実に拾う）<input name="aliases" maxlength="200" placeholder="例: トヨタ, Toyota"></label>
       <label>除外語（任意・カンマ区切り）<input name="exclude" maxlength="600" placeholder="例: バファローズ, 野球（同名の別の話題を外す）"></label>
       <div class="form-actions">
         <button id="watch-submit" class="btn btn-primary" type="submit">追加</button>

@@ -181,7 +181,8 @@ class TextMatchTests(unittest.TestCase):
 class ConfigTests(unittest.TestCase):
     def test_clean_watch_validation(self):
         w = config.clean_watch({"name": " トヨタ ", "code": "7203", "aliases": "Toyota、トヨタ自"})
-        self.assertEqual(w, {"name": "トヨタ", "code": "7203", "aliases": ["Toyota", "トヨタ自"], "exclude": []})
+        self.assertEqual({k: w[k] for k in ("name", "code", "aliases", "exclude")},
+                         {"name": "トヨタ", "code": "7203", "aliases": ["Toyota", "トヨタ自"], "exclude": []})
         for bad in ({"name": "a"}, {"name": "x" * 41}, {"name": "ok名前", "code": "a b"}, {"name": "ok名前", "aliases": ["z"]}):
             with self.assertRaises(ValueError):
                 config.clean_watch(bad)
