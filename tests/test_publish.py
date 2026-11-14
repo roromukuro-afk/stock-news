@@ -149,5 +149,49 @@ class SyncWatchlistTests(unittest.TestCase):
         self.assertIn("テスト銘柄", seen["input"])
 
 
+class LoginChecksTests(unittest.TestCase):
+    """publish check のログイン画面・Cookie の確かめ（応答は作り物。ネットワークは使わない）。"""
+
+    @staticmethod
+    def server(*, bad_sets_cookie=False, accepts_tampered=False, redirect_to="/login", cookie_ok=True, down=False):
+        def fake(url, method="GET", headers=None, data=None):
+            if down:
+                return None, "timed out"
+            h = headers or {}
+            path = url.split("pages.dev", 1)[-1] if "pages.dev" in url else url
+            if path == "/" and "text/html" in h.get("Accept", ""):
+                return 303, {"Location": redirect_to}
+            if path == "/login" and method == "GET":
+                return 200, {}
+            if path == "/login" and method == "POST":
+                if b"wrong-password" in (data or b""):
+                    return 401, ({"Set-Cookie": "sn_auth=1.a; Path=/"} if bad_sets_cookie else {})
+                return 303, ({"Set-Cookie": "sn_auth=123.abcdef; Path=/; HttpOnly"} if cookie_ok else {})
+            if path == "/data/news.json":
+                c = h.get("Cookie", "")
+                return (200 if c == "sn_auth=123.abcdef" or (accepts_tampered and c.startswith("sn_auth=")) else 401), {}
+            return 404, {}
+        return fake
+
+    def run_checks(self, **kw):
+        with mock.patch.object(publish, "_raw", self.server(**kw)):
+            return publish.login_checks("https://x.pages.dev", "secret")
+
+    def test_all_good(self):
+        res = self.run_checks()
+        self.assertEqual(len(res), 6)
+        self.assertTrue(all(g is True for _, _, g in res), res)
+
+    def test_flags_each_wrong_behaviour(self):
+        for kw in ({"bad_sets_cookie": True}, {"accepts_tampered": True}, {"redirect_to": "/other"}, {"cookie_ok": False}):
+            res = self.run_checks(**kw)
+            self.assertTrue(any(g is not True for _, _, g in res), kw)
+
+    def test_unreachable_is_unverified_not_ok(self):
+        res = self.run_checks(down=True)
+        self.assertTrue(any(g is None for _, _, g in res))
+        self.assertFalse(any(g is True for _, _, g in res))
+
+
 if __name__ == "__main__":
     unittest.main()

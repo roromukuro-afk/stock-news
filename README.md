@@ -47,12 +47,12 @@ AI（Gemini）も外部サービスも使わず、通信もしないので、費
 
 ## スマホで見る（Cloudflare Pages・合言葉つき）と自動更新（GitHub Actions）
 
-取得済みのデータの写しを Cloudflare Pages に置きます。開くと合言葉を聞かれます（ユーザー名は何でもよい）。
+取得済みのデータの写しを Cloudflare Pages に置きます。開くとログイン画面で合言葉を聞かれます。一度入れると、長持ちする Cookie（180 日・使うたびに延びる）が付くので、スマホのホーム画面に入れたアプリでも毎回は聞かれません。合言葉を変えると、前の Cookie は全部使えなくなります。確認用の道具（curl など）は、従来どおり Basic 認証（ユーザー名は何でもよい）でも入れます。
 
 ```bash
 python -m stocknews publish setup          # 初回だけ: 置き場所の作成・合言葉の登録（.env に鍵が要る）
 python -m stocknews publish deploy         # 取得して置き直す（--no-fetch で取得を省く・--only-if-new で新着がなければ置かない）
-python -m stocknews publish check          # 合言葉なし=401・正しい合言葉=200 を確かめる
+python -m stocknews publish check          # 合言葉なし=401・正しい合言葉=200・ログイン画面と Cookie を確かめる
 python -m stocknews publish password       # 公開先の URL と合言葉を表示する
 python -m stocknews publish sync-watchlist # 銘柄リストを GitHub の秘密の変数に送る
 ```

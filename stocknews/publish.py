@@ -2,14 +2,15 @@
 
     python -m stocknews publish setup      初回だけ: トークンの確認・置き場所の作成・合言葉の登録
     python -m stocknews publish deploy     取得して書き出し、公開先に置く（--no-fetch で取得を省く）
-    python -m stocknews publish check      公開先で、合言葉なし=401・違う合言葉=401・正しい合言葉=200 を確かめる
+    python -m stocknews publish check      公開先で、合言葉なし=401・違う合言葉=401・正しい合言葉=200 と、ログイン画面・Cookie を確かめる
     python -m stocknews publish password   合言葉を表示する（自分が見るときだけ）
 
 必要な値は .env（git 管理外）に入れる。表示もチャットへの貼り付けもしない:
     CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN（Cloudflare Pages: Edit の権限）
     SITE_PASSWORD と CLOUDFLARE_PAGES_PROJECT は setup が作る。
 
-守り方: functions/_middleware.js が全部の要求（画面もデータも）で合言葉（Basic 認証）を確かめる。
+守り方: functions/_middleware.js が全部の要求（画面もデータも）で合言葉を確かめる。入り方は、ログイン画面（/login）で
+入れて長持ちする Cookie をもらう（スマホのホーム画面のアプリで毎回聞かれないように）か、Basic 認証（道具用）。
 合言葉を Cloudflare に登録してからでないと置かない（deploy が確かめる）ので、置いた瞬間から保護されている。
 公開先に置くのは取得済みのデータの写し。取り直しは手元の PC で行う（公開先は自分では取得しない）。
 """
@@ -24,6 +25,7 @@ import shutil
 import string
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from .config import Paths
@@ -215,6 +217,52 @@ def deployment_urls(text: str, project: str) -> list[str]:
     return re.findall(r"https://[a-z0-9]+\.%s\.pages\.dev" % re.escape(project), text)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None          # 転送を追わず、3xx の応答そのものを見る
+
+
+def _raw(url: str, method: str = "GET", headers: dict | None = None, data: bytes | None = None):
+    """転送を追わずに 1 回だけ要求する。戻り値は (状態, 応答ヘッダー)。接続できなければ (None, 理由)。"""
+    req = urllib.request.Request(url, method=method, data=data, headers={"User-Agent": UA, **(headers or {})})
+    try:
+        with urllib.request.build_opener(_NoRedirect).open(req, timeout=60) as r:
+            return r.status, r.headers
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers
+    except (urllib.error.URLError, OSError) as e:
+        return None, str(getattr(e, "reason", e))[:50]
+
+
+def login_checks(base: str, password: str) -> list[tuple[str, object, bool | None]]:
+    """ログイン画面と Cookie が本番で想定どおりか。戻り値は (名前, 状態, 想定どおりか)。接続できなければ None。"""
+    form = {"Content-Type": "application/x-www-form-urlencoded"}
+    out: list[tuple[str, object, bool | None]] = []
+
+    def add(label, got, want, extra=True):
+        code = got[0]
+        out.append((label, code if code is not None else f"接続できません({got[1]})", None if code is None else (code == want and extra)))
+        return got
+
+    r = add("画面を開く（合言葉なし）→ログイン画面へ", _raw(base + "/", headers={"Accept": "text/html"}), 303)
+    if r[0] == 303 and not (r[1].get("Location") or "").endswith("/login"):
+        out[-1] = (out[-1][0], 303, False)
+    add("ログイン画面", _raw(base + "/login", headers={"Accept": "text/html"}), 200)
+    bad = add("違う合言葉でログイン", _raw(base + "/login", "POST", form, urllib.parse.urlencode({"password": "wrong-password"}).encode()), 401)
+    if bad[0] == 401 and bad[1].get("Set-Cookie"):
+        out[-1] = (out[-1][0], 401, False)
+    good = add("正しい合言葉でログイン", _raw(base + "/login", "POST", form, urllib.parse.urlencode({"password": password}).encode()), 303)
+    cookie = ((good[1].get("Set-Cookie") if good[0] == 303 else "") or "").split(";")[0]
+    if good[0] == 303 and not cookie.startswith("sn_auth="):
+        out[-1] = (out[-1][0], 303, False)
+    if cookie.startswith("sn_auth="):
+        add("Cookie だけでデータを取る", _raw(base + "/data/news.json", headers={"Cookie": cookie}), 200)
+        add("改ざんした Cookie は通らない", _raw(base + "/data/news.json", headers={"Cookie": cookie[:-1] + ("0" if cookie[-1] != "0" else "1")}), 401)
+    else:
+        out.append(("Cookie だけでデータを取る", "Cookie が付きませんでした", False))
+    return out
+
+
 def check(paths: Paths, extra_urls: list[str] | None = None) -> int:
     env = read_env(paths)
     need(env, "CLOUDFLARE_PAGES_PROJECT", "SITE_PASSWORD")
@@ -253,6 +301,11 @@ def check(paths: Paths, extra_urls: list[str] | None = None) -> int:
                 ok &= all(r[2] for r in res)
             print(base.replace("https://", ""), path, " / ".join(
                 f"{a} {b}{'' if c in (True, None) else ' ←想定外'}" for a, b, c in res))
+    # ログイン画面と Cookie（本番だけ）
+    lres = login_checks(main_base, env["SITE_PASSWORD"])
+    for label, code, good_ in lres:
+        print(f"{main_base.replace('https://', '')} ログイン: {label} {code}{'' if good_ is not False else ' ←想定外'}")
+    ok &= all(g is not False for _, _, g in lres) and not any(g is None for _, _, g in lres)
     print("結果:", "合言葉が効いています" if ok and not unverified else
           ("合言葉が効いています（接続できず未確認のものがあります）" if ok else "想定と違う応答、または本番に接続できません"))
     return 0 if ok else 1
