@@ -1,0 +1,13 @@
+name = "stock-news-cron"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+workers_dev = false          # 公開の URL を作らない（外から呼べない）
+preview_urls = false
+
+[triggers]
+crons = ["7 * * * *"]        # 毎時 7 分（UTC）
+
+[vars]
+REPO = "roromukuro-afk/stock-news"
+WORKFLOW = "update.yml"
+REF = "main"
