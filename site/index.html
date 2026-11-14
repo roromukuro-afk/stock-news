@@ -31,8 +31,8 @@
 
   <div class="wrap viewbar">
     <div id="view" class="seg" role="group" aria-label="表示">
-      <button type="button" data-view="news">ニュース</button>
       <button type="button" data-view="stocks">銘柄別</button>
+      <button type="button" data-view="news">一般ニュース</button>
     </div>
   </div>
 
@@ -57,22 +57,23 @@
   </div>
 
   <section id="stock-view" class="wrap" hidden>
-    <div id="stock-grid" class="stock-grid"></div>
     <div id="stock-detail" hidden>
       <div class="stock-head">
-        <button id="stock-back" class="btn" type="button">← 銘柄一覧</button>
+        <button id="stock-back" class="btn" type="button">← 銘柄ごとに戻る</button>
         <div class="stock-title"><h2 id="stock-name"></h2><span id="stock-code" class="code"></span></div>
         <button id="stock-edit" class="btn" type="button">除外語・別名</button>
       </div>
+      <div id="stock-stats" class="stat-grid"></div>
+      <div id="type-chips" class="tabs" role="tablist" aria-label="種別"></div>
       <div id="kind-chips" class="tabs" role="tablist" aria-label="種類"></div>
       <div class="toggles stock-toggles">
-        <button id="t-tier" class="toggle" type="button" aria-pressed="false">最重要・重要のみ</button>
         <button id="t-uncertain" class="toggle" type="button" aria-pressed="true">関連不確実も表示</button>
       </div>
     </div>
   </section>
 
   <main class="wrap">
+    <div id="pinned" class="pinned" hidden></div>
     <p id="note" class="note" hidden></p>
     <div id="list" class="list" aria-live="polite"></div>
     <div class="more-wrap"><button id="btn-more" class="btn btn-wide" type="button" hidden>さらに表示</button></div>
@@ -81,6 +82,7 @@
       <p class="excl-help">除外語に当たって、この銘柄の記事から外したものです。外したのが間違いなら、除外語を直してください。</p>
       <ul id="excluded-list"></ul>
     </details>
+    <section id="stock-profile" class="profile" hidden></section>
   </main>
 
   <dialog id="dlg-watch" aria-labelledby="dlg-watch-title">

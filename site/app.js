@@ -23,8 +23,9 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 保存できなくても表示は続ける */ } },
   };
 
-  const prefs = Object.assign({ cat: 'all', lang: 'all', summary: true, unread: false, view: 'news', stock: null, tierOnly: false, uncertain: true },
-    store.get('sn1.prefs', {}));
+  // 開いたとき最初に出るのは「銘柄別」（保存の名前を変えて、前の「一般ニュース」の記憶を引き継がない）
+  const prefs = Object.assign({ cat: 'all', lang: 'all', summary: true, unread: false, view: 'stocks', stock: null, uncertain: true },
+    store.get('sn2.prefs', {}));
   const readSet = new Set(store.get('sn1.read', []));
   const saved = new Map(Object.entries(store.get('sn1.saved', {})));
 
@@ -34,6 +35,7 @@
     live: false,        // サーバーにつながっているか（更新・編集ができるか）
     q: '',
     kind: 'all',        // 銘柄別の画面での種類
+    type: 'all',        // 銘柄別の画面での種別（すべて・★重要・開示・国内・海外・関連不確実・除外候補）
     onlyWatch: false,
     onlySaved: false,
     limit: PAGE,
@@ -148,8 +150,23 @@
   const relOf = (it, name) => (stocksOf(it).find((s) => s.n === name) || {}).r;
   const isImportant = (it) => it.tier === 'critical' || it.tier === 'important';
 
+  // 記事の種別: 適時開示 / 国内（日本語）/ 海外（英語）
+  const typeOf = (it) => (it.cat === 'disclosure' ? 'disclosure' : it.lang === 'en' ? 'en_news' : 'jp_news');
+  const TYPE_TABS = [['all', 'すべて'], ['important', '★重要'], ['disclosure', '開示'], ['jp_news', '国内'], ['en_news', '海外'], ['uncertain', '関連不確実'], ['excluded', '除外候補']];
+  const excludedOf = (name) => ((S.data && S.data.excluded) || {})[name] || [];
+  const visibleIn = (it, name) => prefs.uncertain || relOf(it, name) === 'certain';
+
+  function inType(it, name, type) {
+    if (type === 'uncertain') return relOf(it, name) === 'uncertain';   // この種別は「関連不確実も表示」の設定に関わらず出す
+    if (!visibleIn(it, name)) return false;
+    if (type === 'all') return true;
+    if (type === 'important') return isImportant(it);
+    return typeOf(it) === type;
+  }
+
+  // 言語・検索・未読で絞った、その銘柄の記事（種別・種類の絞り込みの前）
   function stockBase(name) {
-    return commonFilter(stockPool(name)).filter((it) => (prefs.uncertain || relOf(it, name) === 'certain') && (!prefs.tierOnly || isImportant(it)));
+    return commonFilter(stockPool(name));
   }
 
   // ---- 描画: 記事 ----------------------------------------------------------------
@@ -239,27 +256,71 @@
   // ---- 描画: 銘柄別 --------------------------------------------------------------
   function stockStats(name) {
     const pool = stockPool(name);
-    const certain = pool.filter((it) => relOf(it, name) === 'certain');
+    const since = Date.now() / 1000 - 86400;
     return {
       total: pool.length,
-      certain: certain.length,
       unread: pool.filter((it) => !readSet.has(it.id)).length,
       important: pool.filter(isImportant).length,
+      importantUnread: pool.filter((it) => isImportant(it) && !readSet.has(it.id)).length,
+      disclosure: pool.filter((it) => typeOf(it) === 'disclosure').length,
+      jp: pool.filter((it) => typeOf(it) === 'jp_news').length,
+      en: pool.filter((it) => typeOf(it) === 'en_news').length,
+      uncertain: pool.filter((it) => relOf(it, name) === 'uncertain').length,
+      excluded: excludedOf(name).length,
+      last24h: pool.filter((it) => it.time >= since).length,
       latest: pool.length ? Math.max(...pool.map((it) => it.time)) : 0,
     };
   }
 
-  function renderStockGrid() {
+  // 銘柄ごと（最初の画面）: 銘柄ごとに区切って、新しい記事を数件ずつ出す
+  const HOME_N = 5;
+
+  function renderStockHome() {
     const wl = watchlist();
+    const list = $('#list');
+    if (!wl.length) {
+      list.innerHTML = '<div class="empty">銘柄が登録されていません。「ウォッチ」から追加してください。</div>';
+      return;
+    }
     const rows = wl.map((w, i) => ({ w, i, st: stockStats(w.name) }))
       .sort((a, b) => (b.st.latest - a.st.latest) || (a.i - b.i));
-    $('#stock-grid').innerHTML = rows.length ? rows.map(({ w, st }) => `<button class="stock-card${st.total ? '' : ' is-empty'}" type="button" data-pick="${esc(w.name)}">
-  <span class="nm">${esc(w.name)}</span>
-  <span class="code">${esc(w.code || '')}</span>
-  <span class="nums"><span>${st.total}件</span>${st.unread ? `<span class="pill">未読 ${st.unread}</span>` : ''}${st.important ? `<span class="pill pill-warn">重要 ${st.important}</span>` : ''}</span>
-  <span class="latest">${st.latest ? `最新 ${fmtDateTime.format(new Date(st.latest * 1000))}` : '直近 7 日に記事なし'}</span>
-</button>`).join('')
-      : `<div class="stock-empty">銘柄が登録されていません。「ウォッチ」から追加してください。</div>`;
+    list.innerHTML = rows.map(({ w, st }) => {
+      const pool = commonFilter(stockPool(w.name)).filter((it) => visibleIn(it, w.name)).sort((a, b) => b.time - a.time);
+      const body = pool.length
+        ? pool.slice(0, HOME_N).map((it) => renderItem(it, w.name)).join('')
+        : `<div class="empty">${st.total ? 'この条件に合う記事はありません。' : '直近に記事がありません。'}</div>`;
+      const more = pool.length > HOME_N
+        ? `<button class="btn btn-wide" type="button" data-pick="${esc(w.name)}">${esc(w.name)}の記事をすべて見る（${pool.length}件）</button>` : '';
+      const pills = [`<span class="pill">全記事 ${st.total}</span>`];
+      if (st.unread) pills.push(`<span class="pill">未読 ${st.unread}</span>`);
+      if (st.importantUnread) pills.push(`<span class="pill pill-crit">★重要 ${st.importantUnread}</span>`);
+      pills.push(`<span class="pill">24時間 ${st.last24h}</span>`);
+      return `<section class="stock-sec" aria-label="${esc(w.name)}">
+  <button class="stock-sec-head" type="button" data-pick="${esc(w.name)}">
+    <span class="nm">${esc(w.name)}</span><span class="code">${esc(w.code || '')}</span>
+    <span class="nums">${pills.join('')}</span><span class="go">すべて見る →</span>
+  </button>
+  ${body}${more}
+</section>`;
+    }).join('');
+  }
+
+  // 未読の最重要記事（登録銘柄のもの）を、絞り込みに関わらず上に出す
+  function renderPinned() {
+    const box = $('#pinned');
+    const name = currentStock();
+    const pool = name ? stockPool(name) : S.items.filter((it) => stocksOf(it).length > 0);
+    const hot = pool.filter((it) => it.tier === 'critical' && !readSet.has(it.id));
+    box.hidden = prefs.view !== 'stocks' || hot.length === 0;
+    if (box.hidden) { box.innerHTML = ''; return; }
+    box.innerHTML = `<p class="pinned-h">★ 最重要（未読 ${hot.length}件）</p><ul>${hot.slice(0, 5).map((it) =>
+      `<li><a href="${esc(safeUrl(it.url))}" target="_blank" rel="noopener noreferrer" data-id="${esc(it.id)}">${esc(it.title.length > 60 ? it.title.slice(0, 60) + '…' : it.title)}</a>${name ? '' : `<span class="who">${esc(stocksOf(it).map((s) => s.n).join('・'))}</span>`}</li>`).join('')}</ul>`;
+  }
+
+  // 銘柄の画面で、いま選んでいる銘柄（一覧のときは null）
+  function currentStock() {
+    if (prefs.view !== 'stocks' || !prefs.stock) return null;
+    return watchlist().some((w) => w.name === prefs.stock) ? prefs.stock : null;
   }
 
   function renderStockDetail(name) {
@@ -267,39 +328,76 @@
     $('#stock-name').textContent = name;
     $('#stock-code').textContent = w && w.code ? w.code : '';
     const base = stockBase(name);
+    const ex = excludedOf(name);
+    // 銘柄の数字（開示レーダーの銘柄の画面と同じ並び）
+    const st = stockStats(name);
+    $('#stock-stats').innerHTML = [['全記事', st.total], ['未読', st.unread], ['★重要', st.important], ['開示', st.disclosure],
+      ['国内', st.jp], ['海外', st.en], ['関連不確実', st.uncertain], ['除外候補', st.excluded]]
+      .map(([label, n]) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`).join('');
+    // 種別のタブ（件数つき）
+    $('#type-chips').innerHTML = TYPE_TABS.map(([k, label]) => {
+      const n = k === 'excluded' ? ex.length : base.filter((it) => inType(it, name, k)).length;
+      return `<button class="tab" role="tab" type="button" data-type="${k}" aria-selected="${S.type === k}">${esc(label)}<span class="n">${n}</span></button>`;
+    }).join('');
+    const list = $('#list');
+    const onExcluded = S.type === 'excluded';
+    const typed = onExcluded ? [] : base.filter((it) => inType(it, name, S.type));
     // 種類のチップ（件数つき）
     const counts = {};
-    for (const it of base) counts[it.kind || 'other'] = (counts[it.kind || 'other'] || 0) + 1;
-    const chips = [['all', 'すべて', base.length]].concat(KIND_ORDER.filter((k) => counts[k]).map((k) => [k, kindLabel(k), counts[k]]));
+    for (const it of typed) counts[it.kind || 'other'] = (counts[it.kind || 'other'] || 0) + 1;
+    const chips = [['all', 'すべて', typed.length]].concat(KIND_ORDER.filter((k) => counts[k]).map((k) => [k, kindLabel(k), counts[k]]));
     if (S.kind !== 'all' && !counts[S.kind]) S.kind = 'all';
-    $('#kind-chips').innerHTML = chips.map(([k, label, n]) =>
+    $('#kind-chips').hidden = onExcluded;
+    $('#kind-chips').innerHTML = onExcluded ? '' : chips.map(([k, label, n]) =>
       `<button class="tab" role="tab" type="button" data-kind="${esc(k)}" aria-selected="${S.kind === k}">${esc(label)}<span class="n">${n}</span></button>`).join('');
-    const items = base.filter((it) => S.kind === 'all' || (it.kind || 'other') === S.kind);
-    const list = $('#list');
-    list.innerHTML = items.length ? listHtml(items, name) : `<div class="empty">この条件に合う記事はありません。</div>`;
-    showMore(items.length);
-    // 除外した記事（確認用）
-    const ex = ((S.data && S.data.excluded) || {})[name] || [];
+    if (onExcluded) {
+      // 除外候補: 除外語に当たって外した記事を、理由つきで並べる（外したのが間違いなら除外語を直す）
+      list.innerHTML = ex.length ? ex.map((e) => `<article class="item is-read">
+  <time class="t" datetime="${new Date(e.time * 1000).toISOString()}">${timeOf(e.time)}</time>
+  <div><h3 class="title"><a href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer">${esc(e.title)}</a></h3>
+    <p class="meta"><span class="rel-uncertain">除外候補</span><span>${esc(e.source)}</span><span>${esc(e.reason)}</span></p></div><span></span>
+</article>`).join('') : '<div class="empty">除外候補の記事はありません。</div>';
+      $('#btn-more').hidden = true;
+    } else {
+      const items = typed.filter((it) => S.kind === 'all' || (it.kind || 'other') === S.kind);
+      list.innerHTML = items.length ? listHtml(items, name) : `<div class="empty">この条件に合う記事はありません。</div>`;
+      showMore(items.length);
+    }
+    renderProfile(name);
+    // 除外した記事（確認用）: 種別が「除外候補」のときは一覧に出ているので、下の枠は閉じておく
     const box = $('#excluded-box');
-    box.hidden = ex.length === 0;
+    box.hidden = ex.length === 0 || onExcluded;
     $('#excluded-sum').textContent = `除外した記事 ${ex.length} 件（確認用）`;
     $('#excluded-list').innerHTML = ex.map((e) => `<li><a href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer">${esc(e.title)}</a>
       <span class="meta2">${esc(e.source)} ・ ${esc(fmtDateTime.format(new Date(e.time * 1000)))} ・ ${esc(e.reason)}</span></li>`).join('');
     $('#note').hidden = true;
   }
 
+  // この銘柄の監視の設定（見出しとの照合に使う名前・別名・コードと、外す語）
+  function renderProfile(name) {
+    const w = watchlist().find((x) => x.name === name);
+    const box = $('#stock-profile');
+    box.hidden = !w;
+    if (!w) return;
+    const chips = (arr) => (arr.length ? arr.map((t) => `<span class="pchip">${esc(t)}</span>`).join('') : '<span class="pnone">なし</span>');
+    box.innerHTML = `<h2>監視の設定</h2>
+  <p class="pl">名前・別名（見出しとの照合に使う）</p><div class="pchips">${chips([w.name, ...(w.aliases || [])])}</div>
+  <p class="pl">コード</p><div class="pchips">${chips(w.code ? [w.code] : [])}</div>
+  <p class="pl">除外語（当たった記事は外す。決算・M&amp;A・訴訟などの語がある記事は残す）</p><div class="pchips">${chips(w.exclude || [])}</div>`;
+  }
+
   function renderStocks() {
-    const name = prefs.stock && watchlist().some((w) => w.name === prefs.stock) ? prefs.stock : null;
+    const name = currentStock();
     if (prefs.stock && !name) { prefs.stock = null; persistPrefs(); }
-    $('#stock-grid').hidden = !!name;
+    $('#stock-view').hidden = !name;
     $('#stock-detail').hidden = !name;
-    $('#t-tier').setAttribute('aria-pressed', String(prefs.tierOnly));
     $('#t-uncertain').setAttribute('aria-pressed', String(prefs.uncertain));
+    renderPinned();
     if (!name) {
-      renderStockGrid();
-      $('#list').innerHTML = '';
+      renderStockHome();
       $('#btn-more').hidden = true;
       $('#excluded-box').hidden = true;
+      $('#stock-profile').hidden = true;
       $('#note').hidden = true;
       return;
     }
@@ -323,7 +421,8 @@
     $('#t-saved .n').textContent = saved.size ? `(${saved.size})` : '';
     const wcount = S.items.filter((i) => stocksOf(i).length).length;
     $('#t-watch .n').textContent = wcount ? `(${wcount})` : '';
-    if (stocksView) renderStocks(); else renderNews();
+    if (stocksView) renderStocks();
+    else { $('#pinned').hidden = true; $('#stock-profile').hidden = true; renderNews(); }
   }
 
   function renderUpdated() {
@@ -464,14 +563,14 @@
   }
 
   // ---- 操作 ------------------------------------------------------------------
-  function persistPrefs() { store.set('sn1.prefs', prefs); }
+  function persistPrefs() { store.set('sn2.prefs', prefs); }
 
   function markRead(id) {
     if (readSet.has(id)) return;
     readSet.add(id);
     store.set('sn1.read', Array.from(readSet).slice(-READ_MAX));
-    const el = $(`.item[data-id="${CSS.escape(id)}"]`);
-    if (el) el.classList.add('is-read');
+    $$(`.item[data-id="${CSS.escape(id)}"]`).forEach((el) => el.classList.add('is-read'));
+    if (prefs.view === 'stocks') renderPinned();
   }
 
   function toggleSaved(id) {
@@ -507,16 +606,15 @@
     $('#btn-more').addEventListener('click', () => { S.limit += PAGE; render(); });
 
     // 銘柄別
-    $('#stock-grid').addEventListener('click', (e) => {
-      const b = e.target.closest('[data-pick]'); if (!b) return;
-      prefs.stock = b.dataset.pick; S.kind = 'all'; S.limit = PAGE; persistPrefs(); render(); window.scrollTo(0, 0);
+    $('#stock-back').addEventListener('click', () => { prefs.stock = null; S.kind = 'all'; S.type = 'all'; persistPrefs(); render(); });
+    $('#type-chips').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-type]'); if (!b) return;
+      S.type = b.dataset.type; S.kind = 'all'; S.limit = PAGE; render();
     });
-    $('#stock-back').addEventListener('click', () => { prefs.stock = null; S.kind = 'all'; persistPrefs(); render(); });
     $('#kind-chips').addEventListener('click', (e) => {
       const b = e.target.closest('[data-kind]'); if (!b) return;
       S.kind = b.dataset.kind; S.limit = PAGE; render();
     });
-    $('#t-tier').addEventListener('click', () => { prefs.tierOnly = !prefs.tierOnly; S.limit = PAGE; persistPrefs(); render(); });
     $('#t-uncertain').addEventListener('click', () => { prefs.uncertain = !prefs.uncertain; S.limit = PAGE; persistPrefs(); render(); });
     $('#stock-edit').addEventListener('click', () => { if (prefs.stock) openWatch(prefs.stock); });
 
@@ -528,6 +626,11 @@
 
     const list = $('#list');
     list.addEventListener('click', (e) => {
+      const pick = e.target.closest('[data-pick]');
+      if (pick) {   // 銘柄ごとの区切りの見出し・「すべて見る」→ その銘柄の画面へ
+        prefs.stock = pick.dataset.pick; S.kind = 'all'; S.type = 'all'; S.limit = PAGE; persistPrefs(); render(); window.scrollTo(0, 0);
+        return;
+      }
       const star = e.target.closest('[data-star]');
       if (star) { toggleSaved(star.dataset.star); return; }
       const no = e.target.closest('[data-noneed]');
@@ -543,6 +646,10 @@
       const a = e.target.closest('a[data-id]');
       if (a) markRead(a.dataset.id);
     });
+    // 上に出した最重要の枠のリンクも、開いたら既読にする
+    const pinned = $('#pinned');
+    pinned.addEventListener('click', (e) => { const a = e.target.closest('a[data-id]'); if (a) markRead(a.dataset.id); });
+    pinned.addEventListener('auxclick', (e) => { const a = e.target.closest('a[data-id]'); if (a) markRead(a.dataset.id); });
 
     $('#btn-refresh').addEventListener('click', refresh);
     $('#btn-watch').addEventListener('click', () => openWatch());
