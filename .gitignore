@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+data/
+site/data/
+.claude/
+.env
+.wrangler/
+config/watchlist.json
+CLAUDE.md
+.impeccable/
+cache/
+*.enc

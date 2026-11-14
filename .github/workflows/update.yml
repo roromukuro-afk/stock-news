@@ -1,0 +1,88 @@
+name: Update and publish
+
+# 毎時、ニュースを取り直して Cloudflare Pages（合言葉つき）に置く。
+# このリポジトリは公開（Public）。公開リポジトリは Actions の分数が無制限・無料。
+# リポジトリに入れるのはコードだけ。記事のデータ・銘柄リスト・合言葉・トークンは入れない:
+#   - 記事のデータは、この実行の中で作り、そのまま Cloudflare に置く（コミットしない）
+#   - 銘柄リストは秘密の変数 WATCHLIST_JSON から渡す
+#   - 記事の履歴（SQLite）は暗号化してキャッシュに置く（公開リポジトリのキャッシュは他人が読める可能性があるため）
+#   - 実行ログも公開されるので、銘柄名・公開先の名前・アカウント ID は出さない（publish.py が伏せる）
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+# 前回の実行が長引いても重ならないよう、終わるまで待たせる（取り消さない）
+concurrency:
+  group: update-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Restore article history (encrypted cache)
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/news.db.enc
+          key: news-db-none
+          restore-keys: |
+            news-db-
+
+      - name: Decrypt history
+        env:
+          DB_KEY: ${{ secrets.DB_KEY }}
+        run: |
+          mkdir -p data cache
+          if [ -f cache/news.db.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -in cache/news.db.enc -out data/news.db -pass env:DB_KEY \
+              || { echo "履歴を復号できないので、新しく始めます"; rm -f data/news.db; }
+          else
+            echo "履歴のキャッシュがないので、新しく始めます"
+          fi
+
+      - name: Write watchlist from secret
+        env:
+          WATCHLIST_JSON: ${{ secrets.WATCHLIST_JSON }}
+        run: |
+          mkdir -p config
+          if [ -n "$WATCHLIST_JSON" ]; then
+            printf '%s' "$WATCHLIST_JSON" > config/watchlist.json
+          else
+            echo '[]' > config/watchlist.json
+          fi
+
+      - name: Fetch and publish
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ secrets.CLOUDFLARE_PAGES_PROJECT }}
+        run: python3 -X utf8 -m stocknews publish deploy --only-if-new
+
+      - name: Encrypt history
+        if: always()
+        env:
+          DB_KEY: ${{ secrets.DB_KEY }}
+        run: |
+          mkdir -p cache
+          if [ -f data/news.db ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -salt -in data/news.db -out cache/news.db.enc -pass env:DB_KEY
+          fi
+
+      - name: Save article history (encrypted cache)
+        if: always() && hashFiles('cache/news.db.enc') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: cache/news.db.enc
+          key: news-db-${{ github.run_id }}
