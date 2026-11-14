@@ -7,7 +7,7 @@ preview_urls = false
 [triggers]
 crons = ["7 * * * *"]        # 毎時 7 分（UTC）
 
+# REPO（「持ち主/リポジトリ名」）と GITHUB_TOKEN は、秘密の変数として Cloudflare にだけ置く（リポジトリには書かない）
 [vars]
-REPO = "roromukuro-afk/stock-news"
 WORKFLOW = "update.yml"
 REF = "main"
